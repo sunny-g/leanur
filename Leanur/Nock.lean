@@ -119,14 +119,14 @@ namespace Interpreter
 
 open Noun
 
-/- ?, cell or atom -/
+/- ?, is cell (or atom) -/
 def wut : Noun -> Noun
-  | atom _ => 1
   | cell _ _ => 0
+  | atom _ => 1
 scoped prefix:50 "?" => wut
 
-open DSL in #guard (?⟦1⟧) == ⟦1⟧
-open DSL in #guard (?⟦1 2⟧) == ⟦0⟧
+open DSL in #guard (?⟦1 2⟧) == true
+open DSL in #guard (?⟦1⟧) == false
 
 /- +, increment -/
 def lus : Noun -> Noun
@@ -144,10 +144,10 @@ def tis : Noun -> Option Noun
 scoped prefix:50 "=" => tis
 
 open DSL in #guard (=⟦1⟧) == none
-open DSL in #guard (=⟦1 2⟧) == ⟦1⟧
-open DSL in #guard (=⟦2 2⟧) == ⟦0⟧
-open DSL in #guard (=⟦⟦2 2⟧ ⟦2 3⟧⟧) == ⟦1⟧
-open DSL in #guard (=⟦⟦2 3⟧ ⟦2 3⟧⟧) == ⟦0⟧
+open DSL in #guard (=⟦1 2⟧) == false
+open DSL in #guard (=⟦2 2⟧) == true
+open DSL in #guard (=⟦⟦2 2⟧ ⟦2 3⟧⟧) == false
+open DSL in #guard (=⟦⟦2 3⟧ ⟦2 3⟧⟧) == true
 
 /- /, slot (tree addressing operator) -/
 def fas : Noun -> Option Noun
@@ -157,9 +157,9 @@ def fas : Noun -> Option Noun
   | cell 3 (cell _ b) => b
   -- | cell (atom a) b =>
   -- using structural recursion? instead
-  | cell (atom (Nat.succ a)) b =>
-    match (fas (cell ↑((a + 1) / 2) b)) with
-      | some (cell b c) => if (a + 1) % 2 == 0 then b else c
+  | cell (atom (Nat.succ a)) b => do
+    match (<- fas (cell ↑((a + 1) / 2) b)) with
+      | cell b c => if (a + 1) % 2 == 0 then b else c
       | _ => none
   | _ => none
 scoped prefix:50 "/" => fas
@@ -190,21 +190,19 @@ partial def hax : Noun -> Option Noun
   --     then hax (cell (atom ((a + 1) / 2)) (cell (cell b d) c))
   --     else hax (cell (atom ((a) / 2)) (cell (cell d b) c))
   --   | _ => none
-  | cell (atom (Nat.succ a)) (cell b c) => if (a + 1) % 2 == 0
-    then (/(cell ↑(a + 2) c)).bind
-      fun d => hax (cell ↑((a + 1) / 2) (cell (cell b d) c))
-    else (/(cell a c)).bind
-      fun d => hax (cell ↑((a) / 2) (cell (cell d b) c))
+  | cell (atom (Nat.succ a)) (cell b c) => do
+    if (a + 1) % 2 == 0
+      then
+        let d := <- (/(cell ↑(a + 2) c))
+        hax (cell ↑((a + 1) / 2) (cell (cell b d) c))
+      else
+        let d := <- (/(cell a c))
+        hax (cell ↑((a) / 2) (cell (cell d b) c))
   | _ => none
 scoped prefix:50 "#" => hax
 
-/-
-  22  33
-
--/
 open DSL in #guard (#⟦2 11 ⟦22 33⟧⟧) == ⟦11 33⟧
 open DSL in #guard (#⟦3 11 ⟦22 11⟧⟧) == ⟦22 11⟧
-
 open DSL in #guard (#⟦2 11 ⟦⟦22 33⟧ 44⟧⟧) == ⟦11 44⟧
 open DSL in #guard (#⟦3 11 ⟦⟦22 33⟧ 44⟧⟧) == ⟦⟦22 33⟧ 11⟧
 open DSL in #guard (#⟦4 11 ⟦⟦22 33⟧ 44⟧⟧) == ⟦⟦11 33⟧ 44⟧
@@ -239,7 +237,7 @@ partial def tar : Noun -> Option Noun
   1: constant
   return the formula
   -/
-  | cell _ (cell 1 b) => b
+  | cell _a (cell 1 b) => b
   /-
   2: evaluate
   modify the subject against which a second formula is evaluated
@@ -247,37 +245,37 @@ partial def tar : Noun -> Option Noun
   accessing it for evaluation"
   fs = f(s); gs = g(s); gs(fs)
   -/
-  | cell s (cell 2 (cell f g)) =>
-    (tar (cell s f)).bind fun fs =>
-      (tar (cell s g)).bind fun gs =>
-        tar (cell fs gs)
+  | cell s (cell 2 (cell f g)) => do
+    let fs := <- (tar (cell s f))
+    let gs := <- (tar (cell s g))
+    tar (cell fs gs)
   /-
   3: distinguish cell or atom
   does f applied to s resolve to a cell?
   -/
-  | cell s (cell 3 f) => (tar (cell s f)).map wut
+  | cell s (cell 3 f) => do ?(<- (tar (cell s f)))
   /-
   4: increment
-  [eval, then] increment the subject
+  [apply f to s] increment the result
   -/
-  | cell s (cell 4 f) => (tar (cell s f)).map lus
+  | cell s (cell 4 f) => do +(<- (tar (cell s f)))
   /-
   5: test for equality
   are the two nouns, as resolved against the subject, identical?
   -/
-  | cell s (cell 5 (cell f g)) =>
-    (tar (cell s f)).bind fun fs =>
-      (tar (cell s g)).bind fun gs =>
-        =(cell fs gs)
+  | cell s (cell 5 (cell f g)) => do
+    let fs := <- (tar (cell s f))
+    let gs := <- (tar (cell s g))
+    (=(cell fs gs))
   /-
   distribution
   formula is a cell == each contained noun is a formula
   fgs = fg(s); hs = h(s); (fgs hs)
   -/
-  | cell s (cell (cell f g) h) =>
-    (tar (cell s (cell f g))).bind fun fgs =>
-      (tar (cell s h)).bind fun hs =>
-        cell fgs hs
+  | cell s (cell (cell f g) h) => do
+    let fgs := <- (tar (cell s (cell f g)))
+    let hs := <- (tar (cell s h))
+    cell fgs hs
 
   /- sugar -/
   /-
@@ -287,51 +285,51 @@ partial def tar : Noun -> Option Noun
   choose (g,h) based on slot
   eval g(s) | h(s)
   -/
-  | cell s (cell 6 (cell f (cell g h))) =>
-    (tar (cell s (cell 4 (cell 4 f)))).bind fun cond =>
-      (tar (cell (cell 2 3) (cell 0 cond))).bind fun slot =>
-        (tar (cell (cell g h) (cell 0 slot))).bind fun g_or_h =>
-          tar (cell s g_or_h)
+  | cell s (cell 6 (cell f (cell g h))) => do
+    let cond := <- (tar (cell s (cell 4 (cell 4 f))))
+    let slot := <- (tar (cell (cell 2 3) (cell 0 cond)))
+    let g_or_h := <- (tar (cell (cell g h) (cell 0 slot)))
+    tar (cell s g_or_h)
   /-
   7: compose
   evaluation of one formula against the subject,
   then another formula against that result
   g ∘ f s
   -/
-  | cell s (cell 7 (cell f g)) =>
-    (tar (cell s f)).bind fun fs =>
-      tar (cell fs g)
+  | cell s (cell 7 (cell f g)) => do
+    let fs := <- (tar (cell s f))
+    tar (cell fs g)
   /-
   8: extend
   pin a value into the subject
   -/
-  | cell s (cell 8 (cell f g)) =>
-    (tar (cell s f)).bind fun fs =>
-      tar (cell fs g)
+  | cell s (cell 8 (cell f g)) => do
+    let fs := <- (tar (cell s f))
+    tar (cell (cell fs s) g)
   /-
   9: invoke
   invoke a closure or compute over an association of code and data
   eval g against s, then eval the resulting formula in /⟦a s⟧
   -/
-  | cell s (cell 9 (cell a f)) =>
-    (tar (cell s f)).bind fun fs =>
-      tar (cell fs (cell 2 (cell (cell 0 1) (cell 0 a))))
+  | cell s (cell 9 (cell a f)) => do
+    let fs := <- (tar (cell s f))
+    tar (cell fs (cell 2 (cell (cell 0 1) (cell 0 a))))
   /-
   10: replace at address
   -/
-  | cell s (cell 10 (cell (cell f g) h)) =>
-    (tar (cell s g)).bind fun gs =>
-      (tar (cell s h)).bind fun hs =>
-        #(cell f (cell gs hs))
+  | cell s (cell 10 (cell (cell f g) h)) => do
+    let gs := <- (tar (cell s g))
+    let hs := <- (tar (cell s h))
+    #(cell f (cell gs hs))
   /-
   11: hint
   provide an arbitrary annotation for a computation w/o changing the result
   in practice, signals to the runtime to do something Nock doesn't know about
   -/
-  | cell s (cell 11 (cell (cell _f g) h)) =>
-    (tar (cell s g)).bind fun gs =>
-      (tar (cell s h)).bind fun hs =>
-        tar (cell (cell gs hs) (cell 0 3))
+  | cell s (cell 11 (cell (cell _f g) h)) => do
+    let gs := <- (tar (cell s g))
+    let hs := <- (tar (cell s h))
+    tar (cell (cell gs hs) (cell 0 3))
   | cell s (cell 11 (cell _f g)) => tar (cell s g)
   | _ => none
 scoped prefix:50 "*" => tar
