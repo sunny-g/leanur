@@ -1,6 +1,9 @@
 section AST
 
+/- a natural number -/
 abbrev Atom := Nat
+
+/- an atom or a pair of nouns -/
 inductive Noun
   | atom : Atom -> Noun
   | cell : Noun -> Noun -> Noun
@@ -138,9 +141,10 @@ open DSL in #guard (+⟦1⟧) == ⟦2⟧
 open DSL in #guard (+⟦1 2⟧) == ⟦1 2⟧
 
 /- =, equality -/
+open DSL in
 def tis : Noun -> Option Noun
-  | cell a b => if a == b then atom 0 else atom 1
-  | _ => none
+  | atom _ => none
+  | cell a b => if a == b then ⟦0⟧ else ⟦1⟧
 scoped prefix:50 "=" => tis
 
 open DSL in #guard (=⟦1⟧) == none
@@ -193,10 +197,10 @@ partial def hax : Noun -> Option Noun
   | cell (atom (Nat.succ a)) (cell b c) => do
     if (a + 1) % 2 == 0
       then
-        let d := <- (/(cell ↑(a + 2) c))
+        let d <- (/(cell ↑(a + 2) c))
         hax (cell ↑((a + 1) / 2) (cell (cell b d) c))
       else
-        let d := <- (/(cell a c))
+        let d <- (/(cell a c))
         hax (cell ↑((a) / 2) (cell (cell d b) c))
   | _ => none
 scoped prefix:50 "#" => hax
@@ -234,23 +238,23 @@ partial def tar : Noun -> Option Noun
   -/
   | cell a (cell 0 b) => /(cell b a)
   /-
-  1: constant
-  return the formula
+  1: constant/quote
+  return the noun
   -/
   | cell _a (cell 1 b) => b
   /-
-  2: evaluate
+  2: evaluate/apply
   modify the subject against which a second formula is evaluated
   can be thought of as "a way of storing a subprocedure in a subject, then
   accessing it for evaluation"
   fs = f(s); gs = g(s); gs(fs)
   -/
   | cell s (cell 2 (cell f g)) => do
-    let fs := <- (tar (cell s f))
-    let gs := <- (tar (cell s g))
+    let fs <- (tar (cell s f))
+    let gs <- (tar (cell s g))
     tar (cell fs gs)
   /-
-  3: distinguish cell or atom
+  3: is cell
   does f applied to s resolve to a cell?
   -/
   | cell s (cell 3 f) => do ?(<- (tar (cell s f)))
@@ -260,75 +264,79 @@ partial def tar : Noun -> Option Noun
   -/
   | cell s (cell 4 f) => do +(<- (tar (cell s f)))
   /-
-  5: test for equality
+  5: equality
   are the two nouns, as resolved against the subject, identical?
   -/
   | cell s (cell 5 (cell f g)) => do
-    let fs := <- (tar (cell s f))
-    let gs := <- (tar (cell s g))
+    let fs <- (tar (cell s f))
+    let gs <- (tar (cell s g))
     (=(cell fs gs))
   /-
   distribution
-  formula is a cell == each contained noun is a formula
+  when formula is a cell == each contained noun is a formula
   fgs = fg(s); hs = h(s); (fgs hs)
   -/
   | cell s (cell (cell f g) h) => do
-    let fgs := <- (tar (cell s (cell f g)))
-    let hs := <- (tar (cell s h))
+    let fgs <- (tar (cell s (cell f g)))
+    let hs <- (tar (cell s h))
     cell fgs hs
 
   /- sugar -/
   /-
-  6: conditional branch
+  6: if/then/else
   eval f(s), then increment twice to get (2,3) slot addr
   choose (2,3) slot based on condition
   choose (g,h) based on slot
   eval g(s) | h(s)
   -/
   | cell s (cell 6 (cell f (cell g h))) => do
-    let cond := <- (tar (cell s (cell 4 (cell 4 f))))
-    let slot := <- (tar (cell (cell 2 3) (cell 0 cond)))
-    let g_or_h := <- (tar (cell (cell g h) (cell 0 slot)))
+    let cond <- (tar (cell s (cell 4 (cell 4 f))))
+    let slot <- (tar (cell (cell 2 3) (cell 0 cond)))
+    let g_or_h <- (tar (cell (cell g h) (cell 0 slot)))
     tar (cell s g_or_h)
   /-
-  7: compose
+  7: compose/seq
   evaluation of one formula against the subject,
   then another formula against that result
   g ∘ f s
   -/
   | cell s (cell 7 (cell f g)) => do
-    let fs := <- (tar (cell s f))
+    let fs <- (tar (cell s f))
     tar (cell fs g)
   /-
-  8: extend
+  8: extend/push
   pin a value into the subject
+  eval g against product fs and original subject s
   -/
   | cell s (cell 8 (cell f g)) => do
-    let fs := <- (tar (cell s f))
+    let fs <- (tar (cell s f))
     tar (cell (cell fs s) g)
   /-
-  9: invoke
+  9: invoke/call
   invoke a closure or compute over an association of code and data
-  eval g against s, then eval the resulting formula in /⟦a s⟧
+  eval f against s producing a core, then eval the contained formula against /⟦b s⟧
   -/
-  | cell s (cell 9 (cell a f)) => do
-    let fs := <- (tar (cell s f))
-    tar (cell fs (cell 2 (cell (cell 0 1) (cell 0 a))))
+  | cell s (cell 9 (cell b f)) => do
+    let fs <- (tar (cell s f))
+    tar (cell fs (cell 2 (cell (cell 0 1) (cell 0 b))))
   /-
   10: replace at address
+  fs = f(s); gs = g(s); replace /⟦b gs⟧ with fs
   -/
-  | cell s (cell 10 (cell (cell f g) h)) => do
-    let gs := <- (tar (cell s g))
-    let hs := <- (tar (cell s h))
-    #(cell f (cell gs hs))
+  | cell s (cell 10 (cell (cell b f) g)) => do
+    let fs <- (tar (cell s f))
+    let gs <- (tar (cell s g))
+    #(cell b (cell fs gs))
   /-
   11: hint
-  provide an arbitrary annotation for a computation w/o changing the result
+  provide an arbitrary annotation _f for a computation w/o changing the result
   in practice, signals to the runtime to do something Nock doesn't know about
+
+  compute g against a, then throw away the result
   -/
   | cell s (cell 11 (cell (cell _f g) h)) => do
-    let gs := <- (tar (cell s g))
-    let hs := <- (tar (cell s h))
+    let gs <- (tar (cell s g))
+    let hs <- (tar (cell s h))
     tar (cell (cell gs hs) (cell 0 3))
   | cell s (cell 11 (cell _f g)) => tar (cell s g)
   | _ => none
@@ -338,29 +346,46 @@ scoped prefix:50 "*" => tar
 open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦3 4⟧⟧ ⟦0 2⟧⟧) == ⟦1 2⟧
 open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦3 4⟧⟧ ⟦0 4⟧⟧) == ⟦1⟧
 open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦3 4⟧⟧ ⟦0 8⟧⟧) == none
+open DSL in #guard (*⟦⟦⟦4 5⟧ ⟦6 14 15⟧⟧ ⟦0 7⟧⟧) == ⟦14 15⟧
 /- nock 1 -/
 open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦3 4⟧⟧ ⟦1 7⟧⟧) == ⟦7⟧
 open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦3 4⟧⟧ ⟦1 ⟦7 8 9⟧⟧⟧) == ⟦7 8 9⟧
+open DSL in #guard (*⟦42 ⟦1 153 218⟧⟧) == ⟦153 218⟧
 /- nock 2 -/
 open DSL in #guard (*⟦⟦1 2⟧ ⟦2 ⟦0 2⟧ ⟦1 ⟦0 1⟧⟧⟧⟧) == ⟦1⟧
+open DSL in #guard (*⟦77 ⟦2 ⟦1 42⟧ ⟦1 1 153 218⟧⟧⟧) == ⟦153 218⟧
 /- nock 3 -/
-open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦3 4⟧⟧ ⟦3 0 1⟧⟧) == ⟦0⟧
-open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦3 4⟧⟧ ⟦3 0 4⟧⟧) == ⟦1⟧
+open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦3 4⟧⟧ ⟦3 0 1⟧⟧) == true
+open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦3 4⟧⟧ ⟦3 0 4⟧⟧) == false
+open DSL in #guard (*⟦57 ⟦0 1⟧⟧) == ⟦57⟧
+open DSL in #guard (*⟦57 ⟦4 0 1⟧⟧) == ⟦58⟧
 /- nock 4 -/
 open DSL in #guard (*⟦5 ⟦4 0 1⟧⟧) == ⟦6⟧
+open DSL in #guard (*⟦⟦132 19⟧ ⟦0 3⟧⟧) == ⟦19⟧
+open DSL in #guard (*⟦⟦132 19⟧ ⟦4 0 3⟧⟧) == ⟦20⟧
 /- nock 5 -/
-open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦1 2⟧⟧ ⟦5 ⟦0 2⟧ ⟦0 3⟧⟧⟧) == ⟦0⟧
-open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦3 4⟧⟧ ⟦5 ⟦0 2⟧ ⟦0 3⟧⟧⟧) == ⟦1⟧
-open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦1 2⟧⟧ ⟦5 ⟦0 5⟧ ⟦4 0 4⟧⟧⟧) == ⟦0⟧
+open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦1 2⟧⟧ ⟦5 ⟦0 2⟧ ⟦0 3⟧⟧⟧) == true
+open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦3 4⟧⟧ ⟦5 ⟦0 2⟧ ⟦0 3⟧⟧⟧) == false
+open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦1 2⟧⟧ ⟦5 ⟦0 5⟧ ⟦4 0 4⟧⟧⟧) == true
 /-
 distribution
 s ⟦0 3⟧ == ⟦3 4⟧
 s [4 0 5] == +/⟦5 s⟧ == 3
 -/
 open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦3 4⟧⟧ ⟦⟦0 3⟧ ⟦4 0 5⟧⟧⟧) == ⟦⟦3 4⟧ 3⟧
+-- breaking it down
+open DSL in #guard (*⟦42 ⟦4 0 1⟧⟧) == ⟦43⟧
+open DSL in #guard (*⟦42 ⟦3 0 1⟧⟧) == ⟦1⟧
+open DSL in #guard (*⟦42 ⟦⟦4 0 1⟧ ⟦3 0 1⟧⟧⟧) == ⟦43 1⟧
+
 /- nock 6 -/
+open DSL in #guard (*⟦42 ⟦6 ⟦1 0⟧ ⟦4 0 1⟧ ⟦1 233⟧⟧⟧) == ⟦43⟧
+open DSL in #guard (*⟦42 ⟦6 ⟦1 1⟧ ⟦4 0 1⟧ ⟦1 233⟧⟧⟧) == ⟦233⟧
 /- nock 7 -/
+open DSL in #guard (*⟦42 ⟦7 ⟦4 0 1⟧ ⟦4 0 1⟧⟧⟧) == ⟦44⟧ -- increment twice
 /- nock 8 -/
+open DSL in #guard (*⟦42 ⟦8 ⟦4 0 1⟧ ⟦0 1⟧⟧⟧) == ⟦43 42⟧
+open DSL in #guard (*⟦42 ⟦8 ⟦4 0 1⟧ ⟦4 0 3⟧⟧⟧) == ⟦43⟧
 /- nock 9 -/
 /- nock 10 -/
 /- nock 11 -/
