@@ -1,0 +1,12 @@
+name = "leanur"
+version = "0.0.1"
+
+# [[require]]
+# name = "batteries"
+# scope = "leanprover-community"
+# rev = "main"
+
+[[require]]
+name = "mathlib"
+scope = "leanprover-community"
+rev = "v4.17.0-rc1"

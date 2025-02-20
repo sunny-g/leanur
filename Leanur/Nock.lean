@@ -1,3 +1,5 @@
+namespace Leanur.Nock
+
 section AST
 
 /- a natural number -/
@@ -12,13 +14,14 @@ deriving BEq, DecidableEq, Hashable
 section Compat
 
 instance : Coe Atom Noun := ⟨.atom⟩
+/- in nock, 0 == true, 1 == false -/
 instance : Coe Bool Noun where coe
   | true => .atom 0
   | false => .atom 1
 
 instance : OfNat Noun n where ofNat := .atom n
 
-class ToNoun (α : Type _) where
+class ToNoun (α : Type) where
   toNoun : α -> Noun
 export ToNoun (toNoun)
 
@@ -124,8 +127,8 @@ open Noun
 
 /- ?, is cell (or atom) -/
 def wut : Noun -> Noun
-  | cell _ _ => 0
-  | atom _ => 1
+  | atom _ => false
+  | cell _ _ => true
 scoped prefix:50 "?" => wut
 
 open DSL in #guard (?⟦1 2⟧) == true
@@ -144,7 +147,7 @@ open DSL in #guard (+⟦1 2⟧) == ⟦1 2⟧
 open DSL in
 def tis : Noun -> Option Noun
   | atom _ => none
-  | cell a b => if a == b then ⟦0⟧ else ⟦1⟧
+  | cell a b => a == b
 scoped prefix:50 "=" => tis
 
 open DSL in #guard (=⟦1⟧) == none
@@ -159,9 +162,7 @@ def fas : Noun -> Option Noun
   | cell 1 a => a
   | cell 2 (cell a _) => a
   | cell 3 (cell _ b) => b
-  -- | cell (atom a) b =>
-  -- using structural recursion? instead
-  | cell (atom (Nat.succ a)) b => do
+  | cell (Nat.succ a) b => do
     match (<- fas (cell ↑((a + 1) / 2) b)) with
       | cell b c => if (a + 1) % 2 == 0 then b else c
       | _ => none
@@ -188,13 +189,13 @@ open DSL in #guard (/⟦14 ⟦⟦4 5⟧ ⟦6 14 15⟧⟧⟧) == ⟦14⟧
 
 /- #, edit (replaces part of a noun with another) -/
 partial def hax : Noun -> Option Noun
-  | cell 1 (cell a _) => a
+  | cell 1 (cell b _) => b
   -- | cell (atom (Nat.succ a)) (cell b c) => match (/(cell (atom (a)) c)) with
   --   | some d => if (a + 1) % 2 == 0
   --     then hax (cell (atom ((a + 1) / 2)) (cell (cell b d) c))
   --     else hax (cell (atom ((a) / 2)) (cell (cell d b) c))
   --   | _ => none
-  | cell (atom (Nat.succ a)) (cell b c) => do
+  | cell (Nat.succ a) (cell b c) => do
     if (a + 1) % 2 == 0
       then
         let d <- (/(cell ↑(a + 2) c))
@@ -395,3 +396,5 @@ def nock : Noun -> Option Noun
   | _ => none
 
 end Interpreter
+
+end Leanur.Nock
