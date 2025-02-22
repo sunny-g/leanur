@@ -2,63 +2,24 @@ namespace Leanur.Nock
 
 section AST
 
-/- a natural number -/
+/-- a natural number, implemented as a `Nat` -/
 abbrev Atom := Nat
 
-/- an atom or a pair of nouns -/
+/-- an `Atom` or a pair of `Noun`s -/
 inductive Noun
   | atom : Atom -> Noun
   | cell : Noun -> Noun -> Noun
-deriving BEq, DecidableEq, Hashable
+deriving BEq, DecidableEq, Hashable, Inhabited
 
 section Compat
+
+instance : OfNat Noun n where ofNat := .atom n
 
 instance : Coe Atom Noun := ⟨.atom⟩
 /- in nock, 0 == true, 1 == false -/
 instance : Coe Bool Noun where coe
   | true => .atom 0
   | false => .atom 1
-
-instance : OfNat Noun n where ofNat := .atom n
-
-class ToNoun (α : Type) where
-  toNoun : α -> Noun
-export ToNoun (toNoun)
-
-instance : ToNoun Atom where toNoun := Coe.coe
-instance : ToNoun Bool where toNoun := Coe.coe
-instance : ToNoun Noun := ⟨id⟩
-
--- private def any2Noun [ToNoun α] [ToNoun (List α)] : List α -> Noun
---   | [a] => toNoun a
---   | [a, b] => .cell (toNoun a) (toNoun b)
---   | a :: b => .cell (toNoun a) (any2Noun (b.map toNoun))
---   | []  => .atom 1
--- instance [ToNoun α] : ToNoun (List α) where toNoun ns := any2Noun (ns.map toNoun)
-
-private def al2Noun : List Atom -> Noun
-  | [a] => toNoun a
-  | [a, b] => .cell (toNoun a) (toNoun b)
-  | a :: b => .cell (toNoun a) (al2Noun b)
-  | [] => toNoun 0
-instance : ToNoun (List Atom) where toNoun := al2Noun
-
-private def nl2Noun : List Noun -> Noun
-   | [a] => a
-   | [a, b] => .cell a b
-   | a :: b => .cell a (nl2Noun b)
-   | []  => toNoun 0
--- TODO: needs to handle nested lists
-instance [ToNoun α] : ToNoun (List α) where toNoun ns := nl2Noun (ns.map toNoun)
-
-#eval ToNoun.toNoun [1]
-#eval ToNoun.toNoun [1, 2]
-#eval ToNoun.toNoun [[1, 2]]
-#eval ToNoun.toNoun [1, 2, 3]
-#eval ToNoun.toNoun [[1, 2], 3]
-#eval ToNoun.toNoun [1, [2, 3]]
-#eval ToNoun.toNoun [1, 2, 3, 4]
-#eval ToNoun.toNoun [[1, 2], [3, 4]]
 
 open Std Format in
 def Noun.toFormat : Noun -> Format
@@ -70,19 +31,10 @@ def Noun.toString : Noun -> String := ToString.toString ∘ Noun.toFormat
 instance : Std.ToFormat Noun where format := Noun.toFormat
 instance : ToString Noun where toString := Noun.toString
 
-#eval Noun.toString 2
-#eval Noun.toString (.cell 1 2)
-#eval Noun.toString (.cell 1 (.cell 2 3))
-#eval Noun.toString (.cell (.cell 1 2) (.cell 3 4))
-
--- TODO: needs to handle nested lists
--- def fromList : List Atom -> Noun
---   | [] => .atom 0
---   | [a] => .atom a
---   | a :: rest => .cell (.atom a) (fromList rest)
-
--- #eval fromList [1,2]
--- #eval fromList [1,2,3]
+#guard Noun.toString (.atom 2) == "2"
+#guard Noun.toString (.cell 1 2) == "⟦1 2⟧"
+#guard Noun.toString (.cell 1 (.cell 2 3)) == "⟦1 ⟦2 3⟧⟧"
+#guard Noun.toString (.cell (.cell 1 2) (.cell 3 4)) == "⟦⟦1 2⟧ ⟦3 4⟧⟧"
 
 end Compat
 
@@ -144,7 +96,6 @@ open DSL in #guard (+⟦1⟧) == ⟦2⟧
 open DSL in #guard (+⟦1 2⟧) == ⟦1 2⟧
 
 /- =, equality -/
-open DSL in
 def tis : Noun -> Option Noun
   | atom _ => none
   | cell a b => a == b
@@ -251,35 +202,35 @@ partial def tar : Noun -> Option Noun
   fs = f(s); gs = g(s); gs(fs)
   -/
   | cell s (cell 2 (cell f g)) => do
-    let fs <- (tar (cell s f))
-    let gs <- (tar (cell s g))
+    let fs <- tar (cell s f)
+    let gs <- tar (cell s g)
     tar (cell fs gs)
   /-
   3: is cell
   does f applied to s resolve to a cell?
   -/
-  | cell s (cell 3 f) => do ?(<- (tar (cell s f)))
+  | cell s (cell 3 f) => do ?(<- tar (cell s f))
   /-
   4: increment
   [apply f to s] increment the result
   -/
-  | cell s (cell 4 f) => do +(<- (tar (cell s f)))
+  | cell s (cell 4 f) => do +(<- tar (cell s f))
   /-
   5: equality
   are the two nouns, as resolved against the subject, identical?
   -/
   | cell s (cell 5 (cell f g)) => do
-    let fs <- (tar (cell s f))
-    let gs <- (tar (cell s g))
-    (=(cell fs gs))
+    let fs <- tar (cell s f)
+    let gs <- tar (cell s g);
+    =(cell fs gs)
   /-
   distribution
   when formula is a cell == each contained noun is a formula
   fgs = fg(s); hs = h(s); (fgs hs)
   -/
   | cell s (cell (cell f g) h) => do
-    let fgs <- (tar (cell s (cell f g)))
-    let hs <- (tar (cell s h))
+    let fgs <- tar (cell s (cell f g))
+    let hs <- tar (cell s h)
     cell fgs hs
 
   /- sugar -/
@@ -291,9 +242,9 @@ partial def tar : Noun -> Option Noun
   eval g(s) | h(s)
   -/
   | cell s (cell 6 (cell f (cell g h))) => do
-    let cond <- (tar (cell s (cell 4 (cell 4 f))))
-    let slot <- (tar (cell (cell 2 3) (cell 0 cond)))
-    let g_or_h <- (tar (cell (cell g h) (cell 0 slot)))
+    let cond <- tar (cell s (cell 4 (cell 4 f)))
+    let slot <- tar (cell (cell 2 3) (cell 0 cond))
+    let g_or_h <- tar (cell (cell g h) (cell 0 slot))
     tar (cell s g_or_h)
   /-
   7: compose/seq
@@ -302,7 +253,7 @@ partial def tar : Noun -> Option Noun
   g ∘ f s
   -/
   | cell s (cell 7 (cell f g)) => do
-    let fs <- (tar (cell s f))
+    let fs <- tar (cell s f)
     tar (cell fs g)
   /-
   8: extend/push
@@ -310,7 +261,7 @@ partial def tar : Noun -> Option Noun
   eval g against product fs and original subject s
   -/
   | cell s (cell 8 (cell f g)) => do
-    let fs <- (tar (cell s f))
+    let fs <- tar (cell s f)
     tar (cell (cell fs s) g)
   /-
   9: invoke/call
@@ -318,15 +269,15 @@ partial def tar : Noun -> Option Noun
   eval f against s producing a core, then eval the contained formula against /⟦b s⟧
   -/
   | cell s (cell 9 (cell b f)) => do
-    let fs <- (tar (cell s f))
+    let fs <- tar (cell s f)
     tar (cell fs (cell 2 (cell (cell 0 1) (cell 0 b))))
   /-
   10: replace at address
   fs = f(s); gs = g(s); replace /⟦b gs⟧ with fs
   -/
   | cell s (cell 10 (cell (cell b f) g)) => do
-    let fs <- (tar (cell s f))
-    let gs <- (tar (cell s g))
+    let fs <- tar (cell s f)
+    let gs <- tar (cell s g)
     #(cell b (cell fs gs))
   /-
   11: hint
@@ -336,8 +287,8 @@ partial def tar : Noun -> Option Noun
   compute g against a, then throw away the result
   -/
   | cell s (cell 11 (cell (cell _f g) h)) => do
-    let gs <- (tar (cell s g))
-    let hs <- (tar (cell s h))
+    let gs <- tar (cell s g)
+    let hs <- tar (cell s h)
     tar (cell (cell gs hs) (cell 0 3))
   | cell s (cell 11 (cell _f g)) => tar (cell s g)
   | _ => none
