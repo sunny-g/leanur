@@ -224,7 +224,7 @@ partial def tar : Noun -> Option Noun
     let gs <- tar (cell s g);
     =(cell fs gs)
   /-
-  distribution
+  distribution/"implicit cons"/"cell-maker"
   when formula is a cell == each contained noun is a formula
   fgs = fg(s); hs = h(s); (fgs hs)
   -/
@@ -258,7 +258,7 @@ partial def tar : Noun -> Option Noun
   /-
   8: extend/push
   pin a value into the subject
-  eval g against product fs and original subject s
+  eval g against product of f and original subject s
   -/
   | cell s (cell 8 (cell f g)) => do
     let fs <- tar (cell s f)
@@ -295,14 +295,20 @@ partial def tar : Noun -> Option Noun
 scoped prefix:50 "*" => tar
 
 /- nock 0 -/
-open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦3 4⟧⟧ ⟦0 2⟧⟧) == ⟦1 2⟧
-open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦3 4⟧⟧ ⟦0 4⟧⟧) == ⟦1⟧
-open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦3 4⟧⟧ ⟦0 8⟧⟧) == none
-open DSL in #guard (*⟦⟦⟦4 5⟧ ⟦6 14 15⟧⟧ ⟦0 7⟧⟧) == ⟦14 15⟧
+open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦3 6 7⟧⟧ ⟦0 1⟧⟧) == ⟦⟦1 2⟧ ⟦3 6 7⟧⟧
+open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦3 6 7⟧⟧ ⟦0 2⟧⟧) == ⟦⟦1 2⟧⟧
+open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦3 6 7⟧⟧ ⟦0 3⟧⟧) == ⟦⟦3 6 7⟧⟧
+open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦3 6 7⟧⟧ ⟦0 4⟧⟧) == ⟦1⟧
+open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦3 6 7⟧⟧ ⟦0 5⟧⟧) == ⟦2⟧
+open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦3 6 7⟧⟧ ⟦0 6⟧⟧) == ⟦3⟧
+open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦3 6 7⟧⟧ ⟦0 7⟧⟧) == ⟦6 7⟧
+open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦3 6 7⟧⟧ ⟦0 8⟧⟧) == none
 /- nock 1 -/
 open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦3 4⟧⟧ ⟦1 7⟧⟧) == ⟦7⟧
 open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦3 4⟧⟧ ⟦1 ⟦7 8 9⟧⟧⟧) == ⟦7 8 9⟧
 open DSL in #guard (*⟦42 ⟦1 153 218⟧⟧) == ⟦153 218⟧
+open DSL in #guard (*⟦42 ⟦1 67⟧⟧) == ⟦67⟧
+open DSL in #guard (*⟦42 ⟦1 ⟦2 587⟧⟧⟧) == ⟦2 587⟧
 /- nock 2 -/
 open DSL in #guard (*⟦⟦1 2⟧ ⟦2 ⟦0 2⟧ ⟦1 ⟦0 1⟧⟧⟧⟧) == ⟦1⟧
 open DSL in #guard (*⟦77 ⟦2 ⟦1 42⟧ ⟦1 1 153 218⟧⟧⟧) == ⟦153 218⟧
@@ -313,16 +319,25 @@ open DSL in #guard (*⟦57 ⟦0 1⟧⟧) == ⟦57⟧
 open DSL in #guard (*⟦57 ⟦4 0 1⟧⟧) == ⟦58⟧
 /- nock 4 -/
 open DSL in #guard (*⟦5 ⟦4 0 1⟧⟧) == ⟦6⟧
+open DSL in #guard (*⟦5 ⟦4 4 0 1⟧⟧) == ⟦7⟧
 open DSL in #guard (*⟦⟦132 19⟧ ⟦0 3⟧⟧) == ⟦19⟧
 open DSL in #guard (*⟦⟦132 19⟧ ⟦4 0 3⟧⟧) == ⟦20⟧
+open DSL in #guard (*⟦⟦132 19⟧ ⟦4 4 0 3⟧⟧) == ⟦21⟧
+open DSL in #guard (*⟦⟦132 19⟧ ⟦4 4 4 0 3⟧⟧) == ⟦22⟧
 /- nock 5 -/
 open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦1 2⟧⟧ ⟦5 ⟦0 2⟧ ⟦0 3⟧⟧⟧) == true
 open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦3 4⟧⟧ ⟦5 ⟦0 2⟧ ⟦0 3⟧⟧⟧) == false
-open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦1 2⟧⟧ ⟦5 ⟦0 5⟧ ⟦4 0 4⟧⟧⟧) == true
+open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦3 5⟧⟧ ⟦5 ⟦0 5⟧ ⟦4 0 4⟧⟧⟧) == true
+open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦3 5⟧⟧ ⟦5 ⟦0 7⟧ ⟦4 4 0 6⟧⟧⟧) == true
 /-
 distribution
+-/
+open DSL in #guard (*⟦50 ⟦⟦0 1⟧ ⟦1 203⟧⟧⟧) == ⟦50 203⟧
+open DSL in #guard (*⟦50 ⟦⟦0 1⟧ ⟦1 203⟧ ⟦0 1⟧ ⟦1 19⟧ ⟦1 76⟧⟧⟧) == ⟦50 203 50 19 76⟧
+open DSL in #guard (*⟦⟦19 20⟧ ⟦0 1⟧ ⟦1 76⟧ ⟦4 4 0 3⟧⟧) == ⟦⟦19 20⟧ 76 22⟧
+/-
 s ⟦0 3⟧ == ⟦3 4⟧
-s [4 0 5] == +/⟦5 s⟧ == 3
+s ⟦4 0 5] == +/⟦5 s⟧ == 3
 -/
 open DSL in #guard (*⟦⟦⟦1 2⟧ ⟦3 4⟧⟧ ⟦⟦0 3⟧ ⟦4 0 5⟧⟧⟧) == ⟦⟦3 4⟧ 3⟧
 -- breaking it down
