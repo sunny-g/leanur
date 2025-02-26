@@ -7,8 +7,8 @@ abbrev Atom := Nat
 
 /-- an `Atom` or a pair of `Noun`s -/
 inductive Noun
-  | atom : Atom -> Noun
-  | cell : Noun -> Noun -> Noun
+  | atom : Atom → Noun
+  | cell : Noun → Noun → Noun
 deriving BEq, DecidableEq, Hashable, Inhabited
 
 section Compat
@@ -22,11 +22,11 @@ instance : Coe Bool Noun where coe
   | false => .atom 1
 
 open Std Format in
-def Noun.toFormat : Noun -> Format
+def Noun.toFormat : Noun → Format
   | .atom a => format a
   | .cell a b => format "⟦" ++ a.toFormat ++ " " ++ b.toFormat ++ "⟧"
 
-def Noun.toString : Noun -> String := ToString.toString ∘ Noun.toFormat
+def Noun.toString : Noun → String := ToString.toString ∘ Noun.toFormat
 
 instance : Std.ToFormat Noun where format := Noun.toFormat
 instance : ToString Noun where toString := Noun.toString
@@ -55,8 +55,8 @@ instance : Coe (TSyntax `noun) (TSyntax `term) where coe n := ⟨n.raw⟩
 macro_rules
   | `(noun| $num:num) => `(atom $num)
   | `(noun| ⟦$nouns:noun* $noun:noun⟧) => do
-    let mut acc : TSyntax `term <- `($noun)
-    for noun in nouns.reverse do acc <- `(cell $noun $acc)
+    let mut acc : TSyntax `term ← `($noun)
+    for noun in nouns.reverse do acc ← `(cell $noun $acc)
     return acc
   | `(term| $noun:noun) => `(noun| $noun)
 
@@ -78,7 +78,7 @@ namespace Interpreter
 open Noun
 
 /- ?, is cell (or atom) -/
-def wut : Noun -> Noun
+def wut : Noun → Noun
   | atom _ => false
   | cell _ _ => true
 scoped prefix:50 "?" => wut
@@ -87,7 +87,7 @@ open DSL in #guard (?⟦1 2⟧) == true
 open DSL in #guard (?⟦1⟧) == false
 
 /- +, increment -/
-def lus : Noun -> Noun
+def lus : Noun → Noun
   | atom a => atom (a + 1)
   | cell a b => cell a b
 scoped prefix:50 "+" => lus
@@ -96,7 +96,7 @@ open DSL in #guard (+⟦1⟧) == ⟦2⟧
 open DSL in #guard (+⟦1 2⟧) == ⟦1 2⟧
 
 /- =, equality -/
-def tis : Noun -> Option Noun
+def tis : Noun → Option Noun
   | atom _ => none
   | cell a b => a == b
 scoped prefix:50 "=" => tis
@@ -108,13 +108,13 @@ open DSL in #guard (=⟦⟦2 2⟧ ⟦2 3⟧⟧) == false
 open DSL in #guard (=⟦⟦2 3⟧ ⟦2 3⟧⟧) == true
 
 /- /, slot (tree addressing operator) -/
-def fas : Noun -> Option Noun
+def fas : Noun → Option Noun
   | cell 0 _ => none
   | cell 1 a => a
   | cell 2 (cell a _) => a
   | cell 3 (cell _ b) => b
   | cell (Nat.succ a) b => do
-    match (<- fas (cell ↑((a + 1) / 2) b)) with
+    match (← fas (cell ↑((a + 1) / 2) b)) with
       | cell b c => if (a + 1) % 2 == 0 then b else c
       | _ => none
   | _ => none
@@ -139,7 +139,7 @@ open DSL in #guard (/⟦13 ⟦⟦4 5⟧ ⟦6 14 15⟧⟧⟧) == none
 open DSL in #guard (/⟦14 ⟦⟦4 5⟧ ⟦6 14 15⟧⟧⟧) == ⟦14⟧
 
 /- #, edit (replaces part of a noun with another) -/
-partial def hax : Noun -> Option Noun
+partial def hax : Noun → Option Noun
   | cell 1 (cell b _) => b
   -- | cell (atom (Nat.succ a)) (cell b c) => match (/(cell (atom (a)) c)) with
   --   | some d => if (a + 1) % 2 == 0
@@ -149,10 +149,10 @@ partial def hax : Noun -> Option Noun
   | cell (Nat.succ a) (cell b c) => do
     if (a + 1) % 2 == 0
       then
-        let d <- (/(cell ↑(a + 2) c))
+        let d ← (/(cell ↑(a + 2) c))
         hax (cell ↑((a + 1) / 2) (cell (cell b d) c))
       else
-        let d <- (/(cell a c))
+        let d ← (/(cell a c))
         hax (cell ↑((a) / 2) (cell (cell d b) c))
   | _ => none
 scoped prefix:50 "#" => hax
@@ -182,7 +182,7 @@ open DSL in #guard (#⟦14 ⟦123 456⟧ ⟦22 33 44 55⟧⟧) == ⟦22 ⟦33 �
 open DSL in #guard (#⟦15 ⟦123 456⟧ ⟦22 33 44 55⟧⟧) == ⟦22 ⟦33 ⟦44 ⟦123 456⟧⟧⟧⟧
 
 /- *, eval -/
-partial def tar : Noun -> Option Noun
+partial def tar : Noun → Option Noun
   /- core -/
   /-
   0: address at slot
@@ -202,26 +202,26 @@ partial def tar : Noun -> Option Noun
   fs = f(s); gs = g(s); gs(fs)
   -/
   | cell s (cell 2 (cell f g)) => do
-    let fs <- tar (cell s f)
-    let gs <- tar (cell s g)
+    let fs ← tar (cell s f)
+    let gs ← tar (cell s g)
     tar (cell fs gs)
   /-
   3: is cell
   does f applied to s resolve to a cell?
   -/
-  | cell s (cell 3 f) => do ?(<- tar (cell s f))
+  | cell s (cell 3 f) => do ?(← tar (cell s f))
   /-
   4: increment
   [apply f to s] increment the result
   -/
-  | cell s (cell 4 f) => do +(<- tar (cell s f))
+  | cell s (cell 4 f) => do +(← tar (cell s f))
   /-
   5: equality
   are the two nouns, as resolved against the subject, identical?
   -/
   | cell s (cell 5 (cell f g)) => do
-    let fs <- tar (cell s f)
-    let gs <- tar (cell s g);
+    let fs ← tar (cell s f)
+    let gs ← tar (cell s g);
     =(cell fs gs)
   /-
   distribution/"implicit cons"/"cell-maker"
@@ -229,8 +229,8 @@ partial def tar : Noun -> Option Noun
   fgs = fg(s); hs = h(s); (fgs hs)
   -/
   | cell s (cell (cell f g) h) => do
-    let fgs <- tar (cell s (cell f g))
-    let hs <- tar (cell s h)
+    let fgs ← tar (cell s (cell f g))
+    let hs ← tar (cell s h)
     cell fgs hs
 
   /- sugar -/
@@ -242,9 +242,9 @@ partial def tar : Noun -> Option Noun
   eval g(s) | h(s)
   -/
   | cell s (cell 6 (cell f (cell g h))) => do
-    let cond <- tar (cell s (cell 4 (cell 4 f)))
-    let slot <- tar (cell (cell 2 3) (cell 0 cond))
-    let g_or_h <- tar (cell (cell g h) (cell 0 slot))
+    let cond ← tar (cell s (cell 4 (cell 4 f)))
+    let slot ← tar (cell (cell 2 3) (cell 0 cond))
+    let g_or_h ← tar (cell (cell g h) (cell 0 slot))
     tar (cell s g_or_h)
   /-
   7: compose/seq
@@ -253,7 +253,7 @@ partial def tar : Noun -> Option Noun
   g ∘ f s
   -/
   | cell s (cell 7 (cell f g)) => do
-    let fs <- tar (cell s f)
+    let fs ← tar (cell s f)
     tar (cell fs g)
   /-
   8: extend/push
@@ -261,7 +261,7 @@ partial def tar : Noun -> Option Noun
   eval g against product of f and original subject s
   -/
   | cell s (cell 8 (cell f g)) => do
-    let fs <- tar (cell s f)
+    let fs ← tar (cell s f)
     tar (cell (cell fs s) g)
   /-
   9: invoke/call
@@ -269,15 +269,15 @@ partial def tar : Noun -> Option Noun
   eval f against s producing a core, then eval the contained formula against /⟦b s⟧
   -/
   | cell s (cell 9 (cell b f)) => do
-    let fs <- tar (cell s f)
+    let fs ← tar (cell s f)
     tar (cell fs (cell 2 (cell (cell 0 1) (cell 0 b))))
   /-
   10: replace at address
   fs = f(s); gs = g(s); replace /⟦b gs⟧ with fs
   -/
   | cell s (cell 10 (cell (cell b f) g)) => do
-    let fs <- tar (cell s f)
-    let gs <- tar (cell s g)
+    let fs ← tar (cell s f)
+    let gs ← tar (cell s g)
     #(cell b (cell fs gs))
   /-
   11: hint
@@ -287,8 +287,8 @@ partial def tar : Noun -> Option Noun
   compute g against a, then throw away the result
   -/
   | cell s (cell 11 (cell (cell _f g) h)) => do
-    let gs <- tar (cell s g)
-    let hs <- tar (cell s h)
+    let gs ← tar (cell s g)
+    let hs ← tar (cell s h)
     tar (cell (cell gs hs) (cell 0 3))
   | cell s (cell 11 (cell _f g)) => tar (cell s g)
   | _ => none
@@ -358,7 +358,7 @@ open DSL in #guard (*⟦42 ⟦8 ⟦4 0 1⟧ ⟦4 0 3⟧⟧⟧) == ⟦43⟧
 /- nock 11 -/
 open DSL in #guard (*⟦⟦132 19⟧ ⟦11 37 ⟦4 0 3⟧⟧⟧) == ⟦20⟧
 
-def nock : Noun -> Option Noun
+def nock : Noun → Option Noun
   | _ => none
 
 end Interpreter
