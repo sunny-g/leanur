@@ -1,10 +1,20 @@
 name = "leanur"
 version = "0.0.1"
+defaultTargets = ["Leanur", "leanur"]
 
-# [[require]]
-# name = "batteries"
-# scope = "leanprover-community"
-# rev = "main"
+[[lean_lib]]
+name = "Leanur"
+
+[[lean_exe]]
+name = "leanur"
+root = "Main"
+exeName = "leanur"
+supportInterpreter = true
+
+[[require]]
+name = "batteries"
+scope = "leanprover-community"
+rev = "v4.17.0-rc1"
 
 [[require]]
 name = "mathlib"
