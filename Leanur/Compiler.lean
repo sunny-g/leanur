@@ -356,8 +356,7 @@ partial def mkExpr (expr : Lean.Expr) : CompilerM Noun := do
   | .const name _ => do
     -- Handle constant reference (could be a function or constructor)
     -- Check if we have an override for this name
-    let overrides := (← read).overrides
-    match overrides.find? name with
+    match (← read).overrides.find? name with
     | some (.expr noun) => return noun
     | none =>
       -- Get the constant path in our function library
@@ -389,8 +388,7 @@ partial def mkLetValue (value : LetValue) : CompilerM Noun := do
     let functionInfos := (← read).functionInfos
 
     -- Check if we have an override for this constant
-    let overrides := (← read).overrides
-    match overrides.find? declName with
+    match (← read).overrides.find? declName with
     | some (.expr noun) =>
       -- For overrides, assume all arguments are already applied
       return noun
@@ -418,19 +416,6 @@ partial def mkLetValue (value : LetValue) : CompilerM Noun := do
     -- For a zero-based index i, the slot would be 2 + i
     let slotNum := 2 + i
     return cell 0 (cell slotNum valueRef)
-
-  -- | .jp fvarId args => do
-  --   -- Jump is essentially a function call to a local variable
-  --   let fnRef ← compileLocalVar fvarId
-  --   if args.isEmpty then
-  --     return fnRef
-  --   else
-  --     -- Apply arguments
-  --     let argNouns ← compileArgs args
-  --     -- Function calling convention using Nock call (9)
-  --     -- Pack arguments into a tuple
-  --     let argsNoun := argNouns.foldl (fun acc arg => cell acc arg) (atom 0)
-  --     return makeCall fnRef argsNoun
 
   -- | _ => throwError s!"Unsupported let value: {value}"
 
@@ -545,9 +530,21 @@ partial def mkCode (code : Code) : CompilerM Noun := do
     withTemp declNoun fun _ => do
       mkCode cont
 
-  | .fun decl cont
-  | .jp decl cont => do
+  | .fun decl cont => do
     throwError s!"TODO: unimplemented"
+  | .jp decl cont => do
+    -- Jump is essentially a function call to a local variable
+    let fnRef ← mkLocalVar decl.fvarId
+    let args := decl.params.map (Param.toExpr)
+    if args.isEmpty then
+      return fnRef
+    else
+      -- Apply arguments
+      let argNouns ← mkArgs args
+      -- Function calling convention using Nock call (9)
+      -- Pack arguments into a tuple
+      let argsNoun := argNouns.foldl (fun acc arg => cell acc arg) (atom 0)
+      return opCall fnRef argsNoun
 
   | .jmp fvarId args => do
     -- Jump is function application
