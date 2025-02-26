@@ -56,9 +56,9 @@ abbrev CompilerM := ReaderT CompilerCtx (StateRefT CompilerState IO)
 
 ### 3.1 Core Compilation Functions
 
-1. **compileDecl**: Main entry point for compiling a declaration
+1. **mkDecl**: Main entry point for compiling a declaration
    ```lean
-   def compileDecl (declName : Lean.Name) : CompilerM Noun
+   def mkDecl (declName : Lean.Name) : CompilerM Noun
    ```
 
 2. **compile**: Recursive function to convert LCNF code to Nock
