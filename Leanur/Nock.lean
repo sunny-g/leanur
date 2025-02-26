@@ -13,13 +13,20 @@ deriving BEq, DecidableEq, Hashable, Inhabited
 
 section Compat
 
-instance : OfNat Noun n where ofNat := .atom n
+class ToNoun (α : Type) where
+  toNoun : α -> Noun
 
-instance : Coe Atom Noun := ⟨.atom⟩
+@[inline] instance : ToNoun Atom where toNoun := .atom
 /- in nock, 0 == true, 1 == false -/
-instance : Coe Bool Noun where coe
+@[inline] instance : ToNoun Bool where toNoun : Bool -> Noun
   | true => .atom 0
   | false => .atom 1
+@[inline] instance : ToNoun Noun := ⟨id⟩
+
+@[inline] instance : OfNat Noun n where ofNat := .atom n
+
+@[inline] instance : Coe Atom Noun := ⟨.atom⟩
+@[inline] instance : Coe Bool Noun := ⟨ToNoun.toNoun⟩
 
 open Std Format in
 def Noun.toFormat : Noun → Format
