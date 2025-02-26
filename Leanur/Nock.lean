@@ -13,8 +13,11 @@ deriving BEq, DecidableEq, Hashable, Inhabited
 
 section Compat
 
+@[inline] instance : OfNat Noun n where ofNat := .atom n
+
 class ToNoun (α : Type) where
   toNoun : α -> Noun
+export ToNoun (toNoun)
 
 @[inline] instance : ToNoun Atom where toNoun := .atom
 /- in nock, 0 == true, 1 == false -/
@@ -23,10 +26,8 @@ class ToNoun (α : Type) where
   | false => .atom 1
 @[inline] instance : ToNoun Noun := ⟨id⟩
 
-@[inline] instance : OfNat Noun n where ofNat := .atom n
-
 @[inline] instance : Coe Atom Noun := ⟨.atom⟩
-@[inline] instance : Coe Bool Noun := ⟨ToNoun.toNoun⟩
+@[inline] instance : Coe Bool Noun := ⟨toNoun⟩
 
 open Std Format in
 def Noun.toFormat : Noun → Format
@@ -44,6 +45,10 @@ instance : ToString Noun where toString := Noun.toString
 #guard Noun.toString (.cell (.cell 1 2) (.cell 3 4)) == "⟦⟦1 2⟧ ⟦3 4⟧⟧"
 
 end Compat
+
+section Codec
+
+end Codec
 
 end AST
 
