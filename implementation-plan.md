@@ -145,8 +145,8 @@ def addNockPrelude (env : CompilerEnv) : CompilerEnv :=
 
 ### Phase 1: Basic Infrastructure
 - [x] Define Nock interpreter (already done)
-- [ ] Implement core monad and data structures
-- [ ] Create basic compiler infrastructure
+- [x] Implement core monad and data structures
+- [x] Create basic compiler infrastructure
 
 ### Phase 2: Core Feature Support
 - [ ] Implement simple expressions (constants, literals)

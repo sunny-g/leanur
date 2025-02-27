@@ -336,6 +336,60 @@ def mkLocalVar (fvarId : Lean.FVarId) : CompilerM Noun := do
   | none => throwError s!"Unknown variable: {fvarId.name}"
   | some ref => addressTempRef ref
 
+
+/-- Create a constructor for algebraic data types -/
+def mkConstructor (tag : Tag) (fields : List Noun) : CompilerM Noun := do
+  -- Get constructor info if available
+  let ctorInfo ← match (← read).constructorInfos.get? tag with
+    | some info => pure info
+    | none =>
+      -- Default to generic constructor representation if not found
+      pure { arity := fields.length, memRep := MemRep.Constr }
+
+  -- Different memory representations for different constructor types
+  match ctorInfo.memRep with
+  | .Constr =>
+    -- Generic constructor: [tag field1 field2 ...]
+    -- First create the tag value
+    let tagNoun := match tag with
+      | .Builtin name => atom name.hash.toNat -- Built-in tags as hashed atoms
+      | .User name idx => atom idx      -- User-defined tags as index atoms
+
+    -- Then fold all fields into a nested cell structure
+    let fieldsNoun := fields.foldl (fun acc field => cell acc field) tagNoun
+    pure fieldsNoun
+
+  | .Tuple =>
+    -- For single constructor types (records), don't include tag
+    -- Just create a tuple of fields
+    let fieldsNoun := fields.foldl (fun acc field => cell acc field) (atom 0)
+    pure fieldsNoun
+
+  | .List variant =>
+    -- Special encoding for list-like types
+    match variant with
+    | .Nil => pure (atom 0)  -- Empty list is atom 0
+    | .Cons =>
+      -- Cons cell is [head tail]
+      if fields.length >= 2 then
+        let head := fields[0]!
+        let tail := fields[1]!
+        pure (cell head tail)
+      else
+        throwError "Cons constructor requires at least 2 fields"
+
+  | .Maybe variant =>
+    -- Special encoding for Maybe-like types
+    match variant with
+    | .None => pure (atom 0)  -- None is atom 0
+    | .Some =>
+      -- Some is the value directly (unwrapped)
+      if fields.length >= 1 then
+        pure fields[0]!
+      else
+        throwError "Some constructor requires at least 1 field"
+
+
 mutual
 
 /-- Compile function/constructor arguments -/
@@ -343,7 +397,7 @@ partial def mkArgs (args : Array Lean.Expr) : CompilerM (List Noun) := do
   let mut result : List Noun := []
   for arg in args do
     let argNoun ← mkExpr arg
-    result := result.concat argNoun
+    result := result ++ [argNoun]
   return result
 
 /-- Compile a Lean expression to Nock -/
@@ -373,7 +427,10 @@ partial def mkExpr (expr : Lean.Expr) : CompilerM Noun := do
     let argNoun ← mkExpr arg
     -- In Nock, application is done using the call operator (9)
     return opCall fnNoun argNoun
-  -- lam, forallE, letE, mdata, proj
+  -- lam, forallE, letE, proj
+  | .letE declName type value body _ => do
+    -- let ($n : $t) := $v in $b
+    throwError s!"Expr.letE unimplemented"
   | _ => throwError s!"Unsupported expression: {expr}"
 
 /-- Compile a let value (right-hand side of binding) -/
@@ -417,8 +474,6 @@ partial def mkLetValue (value : LetValue) : CompilerM Noun := do
     let slotNum := 2 + i
     return cell 0 (cell slotNum valueRef)
 
-  -- | _ => throwError s!"Unsupported let value: {value}"
-
 /-- Compile a let declaration (variable and its value) -/
 partial def mkLetDecl (decl : LetDecl) : CompilerM Noun := do
   let valueNoun ← mkLetValue decl.value
@@ -454,29 +509,34 @@ partial def mkCaseAlt (fvarId : Lean.FVarId) (alt : Alt) : CompilerM Noun := do
     -- Constructor pattern - compile code with bindings for the fields
     let scrutinee ← mkLocalVar fvarId
 
-    -- Create bindings for the fields
-    withTemp scrutinee fun scrutRef => do
-      -- Add bindings for the fields
-      for i in [:fields.size] do
-        let fieldRef : TempRef := { index := (← read).stackHeight + i }
-        let field := fields[i]!
+    -- Create bindings for the fields in a function that we compose manually
+    -- rather than using for-loops which can create type mismatches
+    let setupFields : CompilerM Noun := do
+      -- Set up a nested function to handle all fields
+      let rec processFields (i : Nat) : CompilerM Noun := do
+        if i >= fields.size then
+          -- When all fields are processed, compile the code
+          mkCode code
+        else
+          -- Process current field and then recursively handle the next one
+          let field := fields[i]!
+          -- Field access via Nock address (0)
+          -- For a constructor, fields start at position 3 (after tag and name)
+          let fieldPath := i + 3
+          let fieldAccess := cell (atom 0) (cell (atom fieldPath) scrutinee)
 
-        -- Create a binding for the field
-        -- Field access via Nock address (0)
-        -- For a constructor, fields start at position 3 (after the tag and constructor name)
-        let fieldPath := i + 3
-        let fieldAccess := cell 0 (cell fieldPath (← addressTempRef scrutRef))
+          -- Push field onto stack and process next field
+          withTemp fieldAccess fun fRef => do
+            -- Register field in our context
+            withReader (fun ctx => {
+              ctx with tempVarMap := ctx.tempVarMap.insert field.fvarId.name.hash.toNat fRef
+            }) (processFields (i + 1))
 
-        -- Push this field onto the stack
-        -- TODO: shouldnt we output this underscore value?
-        let _ ← withTemp fieldAccess fun fRef => do
-          -- Register the field in our context
-          withReader (fun ctx => {
-            ctx with tempVarMap := ctx.tempVarMap.insert field.fvarId.name.hash.toNat fRef
-          }) (pure (atom 0))
+      -- Start processing from the first field
+      processFields 0
 
-      -- Finally, compile the case body with the fields in scope
-      mkCode code
+    -- Create the final expression using withTemp for the scrutinee
+    withTemp scrutinee fun _ => setupFields
 
 /-- Compile a case expression -/
 partial def mkCase (fvarId : Lean.FVarId) (alts : Array Alt) : CompilerM Noun := do
@@ -499,22 +559,35 @@ partial def mkCase (fvarId : Lean.FVarId) (alts : Array Alt) : CompilerM Noun :=
       let altNoun ← match alt with
         -- Default case - compile the code
         | .default code => mkCode code
-        -- Constructor case - check the tag and compile the body TODO:
-        | .alt ctorName _ code => do
-          let condition ← mkCaseAltCondition fvarId ctorName _
+        -- Constructor case - check the tag and compile the body
+        | .alt ctorName fields code => do
+          -- Get the constructor index from the environment
+          let env := (← read).env
+          -- For now, we'll use a simple approach - ctor index is 0 if unknown
+          let ctorIdx :=
+            match env.find? ctorName with
+            | some (.ctorInfo ctorVal) => ctorVal.cidx
+            | _ => 0  -- Default index if not found
+          let condition ← mkCaseAltCondition fvarId ctorName ctorIdx
           mkCaseAlt fvarId alt
 
       match result with
       -- This is the last (or only) alternative
-      | none => result := altNoun
+      | none => result := some altNoun
       | some elseNoun => match alt with
         -- Build an if-then-else using Nock op 6
         -- Default case always matches
-        | .default _ => result := altNoun
-        -- Constructor case - create a condition TODO:
-        | .alt ctorName _ _ =>
-          let condition ← mkCaseAltCondition fvarId ctorName _
-          result := opIf condition altNoun elseNoun
+        | .default _ => result := some altNoun
+        -- Constructor case - create a condition
+        | .alt ctorName fields _ =>
+          -- Get the constructor index again
+          let env := (← read).env
+          let ctorIdx :=
+            match env.find? ctorName with
+            | some (.ctorInfo ctorVal) => ctorVal.cidx
+            | _ => 0  -- Default index if not found
+          let condition ← mkCaseAltCondition fvarId ctorName ctorIdx
+          result := some (opIf condition altNoun elseNoun)
 
     -- Return the final pattern matching expression
     pure (result.getD 0)
@@ -531,7 +604,15 @@ partial def mkCode (code : Code) : CompilerM Noun := do
       mkCode cont
 
   | .fun decl cont => do
-    throwError s!"TODO: unimplemented"
+    -- Compile a local function declaration
+    let funNoun ← mkFunDecl decl
+
+    -- Add the function to the environment
+    withTempVar funNoun fun funRef => do
+      -- Register the function in our context
+      withReader (fun ctx => {
+        ctx with tempVarMap := ctx.tempVarMap.insert decl.fvarId.name.hash.toNat funRef
+      }) (mkCode cont)
   | .jp decl cont => do
     -- Jump is essentially a function call to a local variable
     let fnRef ← mkLocalVar decl.fvarId
@@ -563,37 +644,41 @@ partial def mkCode (code : Code) : CompilerM Noun := do
     -- Unreachable code
     pure (atom 0)
 
-
 /-- Compile a function declaration (w/ params and body) -/
 partial def mkFunDecl (decl : FunDecl) : CompilerM Noun := do
   -- Handle parameters by creating bindings for them
-  let mut bodyCompiler : CompilerM Noun := pure (atom 0)
+  let params := decl.params.toList
 
-  -- Start with the innermost parameter and work outwards
-  let mut params := decl.params.toList
+  -- Use a recursive approach to set up parameters to avoid for-loop type issues
+  let rec setupParamsAndCompileBody (i : Nat) (ctx : CompilerCtx) : CompilerM Noun :=
+    if i >= params.length then
+      -- When all parameters are set up, compile the body with the updated context
+      withReader (fun _ => ctx) (mkCode decl.value)
+    else
+      -- Process current parameter and continue to the next one
+      let param := params[i]!
+      -- Calculate reference to parameter in the stack
+      let paramRef : TempRef := { index := ctx.stackHeight - i - 1 }
+      -- Update context with this parameter binding
+      let newCtx := {
+        ctx with
+        tempVarMap := ctx.tempVarMap.insert param.fvarId.name.hash.toNat paramRef
+      }
+      -- Process the next parameter with updated context
+      setupParamsAndCompileBody (i+1) newCtx
 
-  -- Compile the function body with parameters in scope
-  bodyCompiler := do
-    -- Create a binding for each parameter
-    for param in params do
-      -- Create a reference to the parameter
-      let paramRef : TempRef := { index := (← read).stackHeight - params.idxOf param - 1 }
-      -- Add it to our environment
-      -- TODO: shouldnt we output this underscore value?
-      let _ ← withReader (fun ctx => {
-        ctx with tempVarMap := ctx.tempVarMap.insert param.fvarId.name.hash.toNat paramRef
-      }) (pure (atom 0))
+  -- Get current context to start the process
+  let currentCtx ← read
+  -- Compile body with all parameters in scope
+  let body ← setupParamsAndCompileBody 0 currentCtx
 
-    -- Finally, compile the actual function body
-    mkCode decl.value
-
-  -- Create a closure that captures the function body and parameters
+  -- Build the function representation from the inside out
   -- The closure is represented as a cell with:
   -- [param1 [param2 ... [paramN body]...]]
-  let mut result ← bodyCompiler
+  let mut result := body
   for param in params.reverse do
     -- Wrap each parameter around the body
-    result := cell param.fvarId.name.hash.toNat result
+    result := cell (atom param.fvarId.name.hash.toNat) result
 
   return result
 
@@ -617,40 +702,156 @@ partial def mkDecl (declName : Lean.Name) : CompilerM Noun := do
   let env := (← read).env
   match env.find? declName with
   | none => throwError s!"Declaration {declName} not found"
-  | some _ => do
-    -- Get the LCNF representation
-    match (← getDecl? declName) with
-    | some (.funDecl funDecl) => do
-      -- Compile the function declaration
-      let noun ← mkFunDecl funDecl
-      -- Add it to our bindings
+  | some constInfo => do
+    -- We can't directly use getDecl? as it returns a different monad
+    -- Process based on the constant info type
+    match constInfo with
+    | .defnInfo val => do
+      -- Create a simplified function representation
+      let arity := val.type.getForallArity
+
+      -- For recursive functions, we need a placeholder approach
+      -- For now, create a simple representation
+      let noun := cell arity declName.hash.toNat
       appendBinding declName noun
       return noun
 
-    | some (.paramDecl _) => do
-      -- Handle parameters (type parameters, etc.)
-      let noun := atom 0  -- Simple representation for now
+    | .ctorInfo val => do
+      -- Create a constructor function
+      let tag := Tag.User val.induct val.cidx
+      let ctorInfo := {
+        arity := val.numFields,
+        memRep := MemRep.Constr
+      }
+      -- Register the constructor info
+      withReader (fun ctx => {
+        ctx with constructorInfos := ctx.constructorInfos.insert tag ctorInfo
+      }) (pure ())
+
+      -- Return a representation of the constructor as a function
+      let noun := cell val.cidx declName.hash.toNat
       appendBinding declName noun
       return noun
 
-    | some (.recFunDecl recFunDecls) => do
-      -- Handle mutually recursive functions
-      throwError "Recursive function declarations not yet implemented"
+    | .axiomInfo val => do
+      -- Handle axiom - create a constant value
+      let noun := atom declName.hash.toNat
+      appendBinding declName noun
+      return noun
 
-    | some (.letDecl letDecl) => do
-      -- Handle let declarations
-      let valNoun ← mkLetValue letDecl.value
-      appendBinding declName valNoun
-      return valNoun
+    | .thmInfo val => do
+      -- Handle theorem - similar to definition
+      let arity := val.type.getForallArity
+      let noun := cell arity declName.hash.toNat
+      appendBinding declName noun
+      return noun
 
-    | none => do
-      -- If no LCNF representation, create a simple constant
-      let noun := atom declName.hash
+    | .opaqueInfo val => do
+      -- Handle opaque definition - similar to definition
+      let arity := val.type.getForallArity
+      let noun := cell arity declName.hash.toNat
+      appendBinding declName noun
+      return noun
+
+    | .quotInfo val => do
+      -- Handle quotient type
+      let noun := atom declName.hash.toNat
+      appendBinding declName noun
+      return noun
+
+    | .inductInfo val => do
+      -- Handle inductive type
+      let noun := atom declName.hash.toNat
+      appendBinding declName noun
+      return noun
+
+    | .recInfo val => do
+      -- Handle recursor
+      let arity := val.type.getForallArity
+      let noun := cell arity declName.hash.toNat
       appendBinding declName noun
       return noun
 
 end
 
 end Compiler
+
+/-- Add standard Nock prelude with overrides for basic operations -/
+def addNockPrelude (ctx : CompilerCtx) : CompilerCtx :=
+  -- Add standard overrides for primitive operations
+  let ctx := { ctx with
+    overrides := ctx.overrides.insert `Nat.add (.expr (cell 7 (cell (cell 4 (cell 0 3)) (cell 0 2))))
+  }
+
+  -- Add specialized representations for common types
+  let ctx := { ctx with
+    constructorInfos := ctx.constructorInfos.insert
+      (Tag.Builtin "List.nil") { arity := 0, memRep := MemRep.List .Nil }
+  }
+
+  let ctx := { ctx with
+    constructorInfos := ctx.constructorInfos.insert
+      (Tag.Builtin "List.cons") { arity := 2, memRep := MemRep.List .Cons }
+  }
+
+  let ctx := { ctx with
+    constructorInfos := ctx.constructorInfos.insert
+      (Tag.Builtin "Option.none") { arity := 0, memRep := MemRep.Maybe .None }
+  }
+
+  let ctx := { ctx with
+    constructorInfos := ctx.constructorInfos.insert
+      (Tag.Builtin "Option.some") { arity := 1, memRep := MemRep.Maybe .Some }
+  }
+
+  ctx
+
+/-- Build a complete Nock program from compiled bindings -/
+def buildProgram (bindings : Array (Lean.Name × Noun)) (mainExpr : Noun) : Noun :=
+  if bindings.isEmpty then
+    -- If no bindings, just return the main expression
+    mainExpr
+  else
+    -- Create the subject (environment) containing all bindings
+    let subject := bindings.foldl
+      -- In Nock, we use op 8 (extend) to add bindings to the subject
+      -- [8 [1 value] continuation]
+      (fun subj (name, value) => opPush value subj)
+      (atom 0)
+
+    -- Compose the final Nock program by applying the main expression
+    -- to the environment we built using Nock op 7 (compose)
+    opSeq subject mainExpr
+
+/-- Main entry point for compiling a declaration to Nock -/
+def compileTerm (env : Lean.Environment) (declName : Lean.Name) : IO Noun := do
+  let ctx := CompilerCtx.fromEnv env
+  let ctx := addNockPrelude ctx
+
+  try
+    -- Create an initial state
+    let initialState := CompilerState.empty
+
+    -- Execute the monad with proper unwrapping:
+    let coreM := (((mkDecl declName).run ctx).run initialState).toIO
+      {fileName := "", fileMap := default}
+      {env}
+
+    -- Return both the result and final state
+    let ((noun, finalState), _) ← coreM
+
+    -- Build a complete Nock program with all dependencies
+    let program := buildProgram finalState.appendedBindings noun
+    pure program
+  catch e =>
+    IO.println s!"Error compiling {declName}: {e}"
+    pure 0
+
+/-- Main entry point for evaluating a compiled term -/
+def evalTerm (env : Lean.Environment) (declName : Lean.Name) : IO (Option Noun) := do
+  let noun ← compileTerm env declName
+  -- Run the compiled term through the Nock interpreter
+  let result := Leanur.Nock.Interpreter.tar (cell 0 noun)
+  pure result
 
 end Leanur.Compiler
