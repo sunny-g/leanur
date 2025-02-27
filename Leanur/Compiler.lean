@@ -823,10 +823,34 @@ def buildProgram (bindings : Array (Lean.Name × Noun)) (mainExpr : Noun) : Noun
     -- to the environment we built using Nock op 7 (compose)
     opSeq subject mainExpr
 
+def compileExpr (env : Lean.Environment) (expr : Lean.Expr) : IO Noun := do
+  -- let env ← Lean.mkEmptyEnvironment
+  let ctx := CompilerCtx.fromEnv env
+  -- let ctx := addNockPrelude ctx
+
+  try
+    -- Create an initial state
+    let initialState := CompilerState.empty
+
+    -- Execute the monad with proper unwrapping:
+    let coreM := (((mkExpr expr).run ctx).run initialState).toIO
+      {fileName := "", fileMap := default}
+      {env}
+
+    -- Return both the result and final state
+    let ((noun, finalState), _) ← coreM
+
+    -- Build a complete Nock program with all dependencies
+    let program := buildProgram finalState.appendedBindings noun
+    pure program
+  catch e =>
+    IO.println s!"Error compiling {expr}: {e}"
+    pure 0
+
 /-- Main entry point for compiling a declaration to Nock -/
 def compileTerm (env : Lean.Environment) (declName : Lean.Name) : IO Noun := do
   let ctx := CompilerCtx.fromEnv env
-  let ctx := addNockPrelude ctx
+  -- let ctx := addNockPrelude ctx
 
   try
     -- Create an initial state
