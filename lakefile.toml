@@ -1,7 +1,7 @@
 name = "leanur"
 version = "0.0.1"
 defaultTargets = ["Leanur", "leanur"]
-testDriver = "LeanurTests"
+testDriver = "Test"
 
 [[lean_exe]]
 name = "leanur"
@@ -14,22 +14,20 @@ name = "Leanur"
 
 # testing
 
+[[lean_lib]]
+name = "Fixtures"
+roots = [
+  "Fixtures.Basic",
+  "Fixtures.Expr",
+  "Fixtures.Recursion",
+]
+
 [[lean_exe]]
-name = "LeanurTests"
+name = "Test"
 root = "Test.Fixtures"
 exeName = "leanur_tests"
 extraDepTargets = ["Fixtures"]
 supportInterpreter = true
-
-
-[[lean_lib]]
-name = "Fixtures"
-roots = [
-  "Fixtures.Expr",
-  "Fixtures.Basic",
-  "Fixtures.Recursion",
-  # "Fixtures.Jock.Dec",
-]
 
 # dependencies
 

@@ -317,11 +317,6 @@ def popTempVar (cont : CompilerM Noun) : CompilerM Noun := do
 
 end Stack
 
--- /-- Run the compiler monad -/
--- def runCompilerM (env : Lean.Environment) (m : CompilerM α) : EStateM.Result String CompilerState α :=
---   let ctx := CompilerCtx.fromEnv env
---   m ctx |>.run CompilerState.empty
-
 section Compiler
 
 /-- Compile a literal to a Nock expression -/
@@ -403,10 +398,11 @@ partial def mkArgs (args : Array Lean.Expr) : CompilerM (List Noun) := do
 /-- Compile a Lean expression to Nock -/
 partial def mkExpr (expr : Lean.Expr) : CompilerM Noun := do
   match expr with
-  -- bvar, mvar
+  | .bvar _ => throwError s!"Expr.bvar unimplemented"
+  | .mvar _ => throwError s!"Expr.mvar unimplemented"
   | .fvar fvarId => mkLocalVar fvarId
   | .lit lit => mkLiteral lit
-  -- sort
+  | .sort _ => throwError s!"Expr.sort unimplemented"
   | .const name _ => do
     -- Handle constant reference (could be a function or constructor)
     -- Check if we have an override for this name
@@ -427,10 +423,12 @@ partial def mkExpr (expr : Lean.Expr) : CompilerM Noun := do
     let argNoun ← mkExpr arg
     -- In Nock, application is done using the call operator (9)
     return opCall fnNoun argNoun
-  -- lam, forallE, letE, proj
+  | .lam _ _ _ _ => throwError s!"Expr.lam unimplemented"
+  | .forallE _ _ _ _ => throwError s!"Expr.forallE unimplemented"
   | .letE declName type value body _ => do
     -- let ($n : $t) := $v in $b
     throwError s!"Expr.letE unimplemented"
+  | .proj _ _ _ => throwError s!"Expr.proj unimplemented"
   | _ => throwError s!"Unsupported expression: {expr}"
 
 /-- Compile a let value (right-hand side of binding) -/
@@ -823,6 +821,11 @@ def buildProgram (bindings : Array (Lean.Name × Noun)) (mainExpr : Noun) : Noun
     -- to the environment we built using Nock op 7 (compose)
     opSeq subject mainExpr
 
+-- /-- Run the compiler monad -/
+-- def runCompilerM (env : Lean.Environment) (m : CompilerM α) : EStateM.Result String CompilerState α :=
+--   let ctx := CompilerCtx.fromEnv env
+--   m ctx |>.run CompilerState.empty
+
 def compileExpr (env : Lean.Environment) (expr : Lean.Expr) : IO Noun := do
   -- let env ← Lean.mkEmptyEnvironment
   let ctx := CompilerCtx.fromEnv env
@@ -844,7 +847,7 @@ def compileExpr (env : Lean.Environment) (expr : Lean.Expr) : IO Noun := do
     let program := buildProgram finalState.appendedBindings noun
     pure program
   catch e =>
-    IO.println s!"Error compiling {expr}: {e}"
+    IO.println s!"Error compiling Lean.Expr: {e}"
     pure 0
 
 /-- Main entry point for compiling a declaration to Nock -/
