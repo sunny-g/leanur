@@ -26,6 +26,11 @@ export ToNoun (toNoun)
   | false => .atom 1
 @[inline] instance : ToNoun Noun := ⟨id⟩
 
+/- cords are UTF-8 text encoded in an atom, little-endian -/
+@[inline] instance : ToNoun String where toNoun (s : String) : Noun :=
+  let num := s.toUTF8.toList.foldr (fun b n => n.shiftLeft 8 |>.lor (b.toNat)) 0
+  (.atom num)
+
 @[inline] instance : Coe Atom Noun := ⟨.atom⟩
 @[inline] instance : Coe Bool Noun := ⟨toNoun⟩
 
@@ -59,6 +64,8 @@ open Noun
 
 declare_syntax_cat noun
 scoped syntax num           : noun
+scoped syntax str           : noun
+scoped syntax "%" noWs str  : noun
 scoped syntax "⟦" noun+ "⟧" : noun
 scoped syntax noun          : term
 
@@ -66,6 +73,8 @@ instance : Coe (TSyntax `noun) (TSyntax `term) where coe n := ⟨n.raw⟩
 
 macro_rules
   | `(noun| $num:num) => `(atom $num)
+  | `(noun| $str:str) => `(toNoun $str)
+  | `(noun| %$str:str) => `(toNoun $str)
   | `(noun| ⟦$nouns:noun* $noun:noun⟧) => do
     let mut acc : TSyntax `term ← `($noun)
     for noun in nouns.reverse do acc ← `(cell $noun $acc)
@@ -83,6 +92,9 @@ macro_rules
 #guard ⟦1 2 3 4⟧ == cell 1 (cell 2 (cell 3 4))
 #guard ⟦⟦1 2⟧ ⟦3 4⟧⟧ == cell (cell 1 2) (cell 3 4)
 
+#guard ⟦"hello"⟧ == atom 478560413032
+#guard ⟦%"hello"⟧ == atom 478560413032
+
 end DSL
 
 namespace Interpreter
@@ -95,12 +107,12 @@ def wut : Noun → Noun
   | cell _ _ => true
 scoped prefix:50 "?" => wut
 
-open DSL in #guard (?⟦1 2⟧) == true
 open DSL in #guard (?⟦1⟧) == false
+open DSL in #guard (?⟦1 2⟧) == true
 
 /- +, increment -/
 def lus : Noun → Noun
-  | atom a => atom (a + 1)
+  | atom a => ↑(a + 1)
   | cell a b => cell a b
 scoped prefix:50 "+" => lus
 
@@ -165,7 +177,7 @@ partial def hax : Noun → Option Noun
         hax (cell ↑((a + 1) / 2) (cell (cell b d) c))
       else
         let d ← (/(cell a c))
-        hax (cell ↑((a) / 2) (cell (cell d b) c))
+        hax (cell ↑(a / 2) (cell (cell d b) c))
   | _ => none
 scoped prefix:50 "#" => hax
 
